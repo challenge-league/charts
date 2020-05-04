@@ -368,7 +368,6 @@ alertmanager:
     storage:
       volumeClaimTemplate:
         spec:
-          storageClassName: local-path
           accessModes: ["ReadWriteOnce"]
           resources:
             requests:
@@ -469,10 +468,57 @@ alertmanager:
 ##
 grafana:
   enabled: true
- 
+
   grafana.ini:
     server:
       root_url: "/api/v1/namespaces/monitoring/services/prometheus-operator-grafana:service/proxy"
+
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+      - name: 'default'
+        orgId: 1
+        folder: 'default'
+        type: file
+        disableDeletion: true
+        options:
+         path: /tmp/dashboards
+
+      - name: 'custom'
+        orgId: 1
+        folder: 'custom'
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards/custom
+
+  dashboards:
+    default:
+    custom:
+      redis:
+        gnetId: 763 # Prometheus Redis by oliver006 https://grafana.com/dashboards/763
+        datasource: Prometheus
+      kong:
+        gnetId: 7424 # Kong (official) by konghq https://grafana.com/dashboards/7424
+        datasource: Prometheus
+      nats:
+        gnetId: 2279 # NATS Server Dashboard by Colin Sullivan https://grafana.com/dashboards/2279
+        datasource: Prometheus
+      gpu:
+        gnetId: 10646 # Kubernetes Deployment Metrics with GPU by Dmitry Kozlov https://grafana.com/dashboards/10646
+        datasource: Prometheus
+      jaeger:
+        gnetId: 10001 # Jaeger by Luong Vo https://grafana.com/grafana/dashboards/10001
+        datasource: Prometheus
+      jaeger-traces:
+        gnetId: 10881 # Jaeger Traces and Metrics by Dmitry Kozlov https://grafana.com/grafana/dashboards/10881
+        datasource: Prometheus
+        revision: 2
+      gpu-metrics:
+        gnetId: 11578 # NVIDIA GPU metrics dashboard by swatig https://grafana.com/grafana/dashboards/11578
+        datasource: Prometheus
 
   ## Deploy default dashboards.
   ##
@@ -1063,6 +1109,11 @@ prometheus-node-exporter:
   extraArgs:
     - --collector.filesystem.ignored-mount-points=^/(dev|proc|sys|var/lib/docker/.+)($|/)
     - --collector.filesystem.ignored-fs-types=^(autofs|binfmt_misc|cgroup|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|mqueue|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|sysfs|tracefs)$
+  tolerations:
+    - operator: "Exists"
+      effect: "NoExecute"
+    - operator: "Exists"
+      effect: "NoSchedule"
 
 ## Manages Prometheus and Alertmanager components
 ##
@@ -1743,7 +1794,6 @@ prometheus:
     storageSpec:
        volumeClaimTemplate:
          spec:
-           storageClassName: local-path
            accessModes: ["ReadWriteOnce"]
            resources:
              requests:
@@ -1866,7 +1916,7 @@ prometheus:
     ##
     portName: "web"
 
-  additionalServiceMonitors: []
+  #additionalServiceMonitors: []
   ## Name of the ServiceMonitor to create
   ##
   # - name: ""
@@ -1993,3 +2043,82 @@ prometheus:
     ## https://github.com/coreos/prometheus-operator/blob/master/Documentation/api.md#podmetricsendpoint
     ##
     # podMetricsEndpoints: []
+  additionalServiceMonitors:
+   - name: "kong-monitor"
+     jobLabel: "kong"
+     namespaceSelector:
+       matchNames:
+         - kong
+     selector:
+       matchLabels:
+         app: kong
+     endpoints:
+       - targetPort: 8444
+         interval: 30s
+         path: /metrics
+
+   - name: "rook-ceph-monitor"
+     jobLabel: "rook"
+     namespaceSelector:
+       matchNames:
+         - rook-ceph
+     selector:
+       matchLabels:
+         app: rook-ceph-mgr
+         rook_cluster: rook-ceph
+     endpoints:
+     - port: http-metrics
+       path: /metrics
+       interval: 5s
+
+   - name: "nats-monitor"
+     jobLabel: "nats"
+     namespaceSelector:
+       matchNames:
+         - nats
+     selector:
+       matchLabels:
+         app: nats
+     endpoints:
+       - targetPort: 7777
+         interval: 30s
+         path: /metrics
+
+   - name: "redis-monitor"
+     jobLabel: "redis"
+     namespaceSelector:
+       matchNames:
+         - redis
+     selector:
+       matchLabels:
+         app: redis
+     endpoints:
+       - port: metrics
+         interval: 30s
+         path: /metrics
+
+   - name: "jaeger-monitor"
+     jobLabel: "jaeger"
+     namespaceSelector:
+       matchNames:
+         - jaeger-operator
+     selector:
+       matchLabels:
+         app.kubernetes.io/part-of: monitoring
+     endpoints:
+       - port: metrics
+         interval: 5s
+         path: /metrics
+
+   - name: "gpu-metrics"
+     jobLabel: "gpu-metrics"
+     namespaceSelector:
+       matchNames:
+         - gpu-operator-resources
+     selector:
+       matchLabels:
+         app: nvidia-dcgm-exporter
+     endpoints:
+       - port: gpu-metrics
+         interval: 30s
+         path: /metrics
